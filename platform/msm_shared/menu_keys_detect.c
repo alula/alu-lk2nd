@@ -29,6 +29,7 @@
 #include <debug.h>
 #include <reg.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <pm8x41.h>
 #include <pm8x41_hw.h>
 #include <kernel/timer.h>
@@ -86,12 +87,19 @@ static uint32_t verify_index_action[] = {
 };
 
 static uint32_t fastboot_index_action[] = {
-		[0] = RESTART,
-		[1] = FASTBOOT,
-		[2] = RECOVER,
-		[3] = POWEROFF,
-		[4] = FFBM,
+		[0] = BOOT,
+		[1] = BOOT_SEC,
+		[2] = BOOT_SEC,
+		[3] = BOOT_SEC,
+		[4] = BOOT_SEC,
+		[5] = RECOVER,
+		[6] = RAMOOPS,
+		[7] = EDL,
+		[8] = POWEROFF,
+		[9] = RESTART,
 };
+
+extern bool slots_present[4];
 
 static uint32_t unlock_index_action[] = {
 		[0] = RECOVER,
@@ -112,12 +120,18 @@ static int is_key_pressed(int keys_type)
 	return 0;
 }
 
+extern bool boot_into_fastboot;
+extern unsigned boot_into_recovery;
+extern char slot_names[NUM_SLOTS][32];
+
+int boot_linux_from_ext2(char *kernel_path, char *ramdisk_path, char *dtb_path, char *cmdline);
+
 static void update_device_status(struct select_msg_info* msg_info, int reason)
 {
 	char ffbm_page_buffer[FFBM_MODE_BUF_SIZE];
-	fbcon_clear();
+	//fbcon_clear();
 	switch (reason) {
-		case RECOVER:
+		/*case RECOVER:
 			if (msg_info->info.msg_type == DISPLAY_MENU_UNLOCK) {
 				set_device_unlock_value(UNLOCK, TRUE);
 			} else if (msg_info->info.msg_type == DISPLAY_MENU_UNLOCK_CRITICAL) {
@@ -126,7 +140,7 @@ static void update_device_status(struct select_msg_info* msg_info, int reason)
 
 			if (msg_info->info.msg_type == DISPLAY_MENU_UNLOCK ||
 				msg_info->info.msg_type == DISPLAY_MENU_UNLOCK_CRITICAL) {
-				/* wipe data */
+				// wipe data
 				struct recovery_message msg;
 
 				memset(&msg, 0, sizeof(msg));
@@ -134,16 +148,67 @@ static void update_device_status(struct select_msg_info* msg_info, int reason)
 				write_misc(0, &msg, sizeof(msg));
 			}
 			reboot_device(RECOVERY_MODE);
-			break;
+			break;*/
 		case RESTART:
 			reboot_device(0);
 			break;
 		case POWEROFF:
 			shutdown_device();
 			break;
+		case EDL:
+			reboot_device(EMERGENCY_DLOAD);
+			break;
+		case RAMOOPS:
+			display_fbcon_menu_message("Not implemented yet", FBCON_RED_MSG, 2);
+			thread_sleep(2000);
+			break;
 		case FASTBOOT:
 			reboot_device(FASTBOOT_MODE);
 			break;
+		case RECOVER:
+			boot_into_recovery = 1;
+		case BOOT_SEC: {
+			char kernel_path[64] = {0};
+			char initrd_path[64] = {0};
+			char dtb_path[64] = {0};
+			char cmdline_path[64] = {0};
+			char msg[128] = {0};
+			char cmdline[512] = {0};
+			int slot = msg_info->info.option_index - 1;
+			boot_into_fastboot = 0;
+			
+			snprintf(&msg, 128, "Loading OS from slot %d: %s\n", slot + 1, slot_names[slot]);
+			display_fbcon_menu_message(&msg, FBCON_GREEN_MSG, 1);
+
+			snprintf(&kernel_path, 64, "/boot/zImage-slot%d", slot + 1);
+			snprintf(&initrd_path, 64, "/boot/initrd.img-slot%d", slot + 1);
+			snprintf(&dtb_path, 64, "/boot/santoni.dtb-slot%d", slot + 1);
+			snprintf(&cmdline_path, 64, "/boot/cmdline-slot%d", slot + 1);
+
+			if (fs_load_file(&cmdline_path, &cmdline, 512) < 0) {
+				display_fbcon_menu_message("Cannot load kernel command line, proceeding with empty one!\n", 
+					FBCON_YELLOW_MSG, 1);
+			}
+
+			int boot_err_type = boot_linux_from_ext2(&kernel_path, &initrd_path, &dtb_path, &cmdline);
+			if (boot_err_type != 0) {
+				display_fbcon_menu_message("Boot failed, returning to fastboot...\n", FBCON_RED_MSG, 1);
+				boot_into_fastboot = 1;
+			}
+			thread_sleep(2000);
+			break;
+		}
+		case BOOT: {
+			boot_into_fastboot = 0;
+			display_fbcon_menu_message("Loading OS from eMMC...\n", FBCON_GREEN_MSG, 1);
+			int boot_err_type = boot_linux_from_mmc();
+			if (boot_err_type != 0) {
+				display_fbcon_menu_message("Boot failed, returning to fastboot...\n", FBCON_RED_MSG, 1);
+				boot_into_fastboot = 1;
+			}
+			thread_sleep(2000);
+			break;
+		}
 		case CONTINUE:
 			display_image_on_screen();
 
@@ -220,6 +285,10 @@ static void menu_volume_up_func (struct select_msg_info* msg_info)
 		msg_info->info.option_index--;
 
 	if (msg_info->info.msg_type == DISPLAY_MENU_FASTBOOT) {
+		while (msg_info->info.option_index > 0 && msg_info->info.option_index < (NUM_SLOTS + 1) 
+			&& !slots_present[msg_info->info.option_index - 1]) {
+			msg_info->info.option_index--;
+		}
 		display_fastboot_menu_renew(msg_info);
 	} else {
 		update_volume_up_bg(msg_info);
@@ -234,6 +303,11 @@ static void menu_volume_down_func (struct select_msg_info* msg_info)
 		msg_info->info.option_index = 0;
 
 	if (msg_info->info.msg_type == DISPLAY_MENU_FASTBOOT) {
+		while (msg_info->info.option_index > 0 && msg_info->info.option_index < (NUM_SLOTS + 1) 
+			&& !slots_present[msg_info->info.option_index - 1]) {
+			msg_info->info.option_index++;
+		}
+
 		display_fastboot_menu_renew(msg_info);
 	} else {
 		update_volume_down_bg(msg_info);

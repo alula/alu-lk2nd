@@ -40,7 +40,7 @@
 #include <pm_app_smbchg.h>
 #endif
 
-#include "font5x12.h"
+#include "font.h"
 
 #if DSI2DPI_TC358762
 #include <smem.h>
@@ -72,17 +72,14 @@ static struct fbcon_config *config = NULL;
 #define RGB888_BLACK            0x000000
 #define RGB888_WHITE            0xffffff
 #define RGB888_CYAN             0x00ffff
-#define RGB888_BLUE             0x0000FF
+#define RGB888_BLUE             0x0000ff
 #define RGB888_SILVER           0xc0c0c0
 #define RGB888_YELLOW           0xffff00
 #define RGB888_ORANGE           0xffa500
 #define RGB888_RED              0xff0000
 #define RGB888_GREEN            0x00ff00
 
-#define FONT_WIDTH		5
-#define FONT_HEIGHT		12
-
-#define SCALE_FACTOR		2
+#define SCALE_FACTOR		1
 
 static uint32_t			BGCOLOR;
 static uint32_t			FGCOLOR;
@@ -100,6 +97,7 @@ static struct fb_color		fb_color_formats_555[] = {
 					[FBCON_ORANGE_MSG] = {RGB565_ORANGE, RGB565_BLACK},
 					[FBCON_RED_MSG] = {RGB565_RED, RGB565_BLACK},
 					[FBCON_GREEN_MSG] = {RGB565_GREEN, RGB565_BLACK},
+					[FBCON_BLUE_MSG] = {RGB565_BLUE, RGB565_BLACK},
 					[FBCON_SELECT_MSG_BG_COLOR] = {RGB565_WHITE, RGB565_BLUE}};
 
 static struct fb_color		fb_color_formats_888[] = {
@@ -111,75 +109,70 @@ static struct fb_color		fb_color_formats_888[] = {
 					[FBCON_ORANGE_MSG] = {RGB888_ORANGE, RGB888_BLACK},
 					[FBCON_RED_MSG] = {RGB888_RED, RGB888_BLACK},
 					[FBCON_GREEN_MSG] = {RGB888_GREEN, RGB888_BLACK},
+					[FBCON_BLUE_MSG] = {RGB888_BLUE, RGB888_BLACK},
 					[FBCON_SELECT_MSG_BG_COLOR] = {RGB888_WHITE, RGB888_BLUE}};
 
 
 void fbcon_flush(void);
 
 static void fbcon_drawglyph(char *pixels, uint32_t paint, unsigned stride,
-			    unsigned bpp, unsigned *glyph, unsigned scale_factor)
+			    unsigned bpp, unsigned char *glyph, unsigned scale_factor)
 {
 	unsigned x, y, i, j, k;
-	unsigned data, temp;
+	unsigned char temp0, temp1, data0, data1;
 	uint32_t fg_color = paint;
 	stride -= FONT_WIDTH * scale_factor;
 
-	data = glyph[0];
-	for (y = 0; y < FONT_HEIGHT / 2; ++y) {
-		temp = data;
+	for (y = 0; y < FONT_HEIGHT; ++y) {
+		temp0 = glyph[y * 2];
+		temp1 = glyph[(y * 2) + 1];
+
 		for (i = 0; i < scale_factor; i++) {
-			data = temp;
+			data0 = temp0;
+			data1 = temp1;
+
 			for (x = 0; x < FONT_WIDTH; ++x) {
-				if (data & 1) {
-					for (j = 0; j < scale_factor; j++) {
-						fg_color = paint;
-						for (k = 0; k < bpp; k++) {
-							*pixels = (unsigned char) fg_color;
-							fg_color = fg_color >> 8;
-							pixels++;
+				if (x < 8) {
+					if (data0 & 0b10000000) {
+						for (j = 0; j < scale_factor; j++) {
+							fg_color = paint;
+							for (k = 0; k < bpp; k++) {
+								*pixels = (unsigned char) fg_color;
+								fg_color = fg_color >> 8;
+								pixels++;
+							}
 						}
 					}
-				}
-				else
-				{
-					for (j = 0; j < scale_factor; j++) {
-						pixels = pixels + bpp;
+					else
+					{
+						for (j = 0; j < scale_factor; j++) {
+							pixels = pixels + bpp;
+						}
 					}
+					data0 <<= 1;
+				} else {
+					if (data1 & 0b10000000) {
+						for (j = 0; j < scale_factor; j++) {
+							fg_color = paint;
+							for (k = 0; k < bpp; k++) {
+								*pixels = (unsigned char) fg_color;
+								fg_color = fg_color >> 8;
+								pixels++;
+							}
+						}
+					}
+					else
+					{
+						for (j = 0; j < scale_factor; j++) {
+							pixels = pixels + bpp;
+						}
+					}
+					data1 <<= 1;
 				}
-				data >>= 1;
 			}
 			pixels += (stride * bpp);
 		}
 	}
-
-	data = glyph[1];
-	for (y = 0; y < FONT_HEIGHT / 2; ++y) {
-		temp = data;
-		for (i = 0; i < scale_factor; i++) {
-			data = temp;
-			for (x = 0; x < FONT_WIDTH; ++x) {
-				if (data & 1) {
-					for (j = 0; j < scale_factor; j++) {
-						fg_color = paint;
-						for (k = 0; k < bpp; k++) {
-							*pixels = (unsigned char) fg_color;
-							fg_color = fg_color >> 8;
-							pixels++;
-						}
-					}
-				}
-				else
-				{
-					for (j = 0; j < scale_factor; j++) {
-						pixels = pixels + bpp;
-					}
-				}
-				data >>= 1;
-			}
-			pixels += (stride * bpp);
-		}
-	}
-
 }
 
 void fbcon_draw_msg_background(unsigned y_start, unsigned y_end,
@@ -331,24 +324,20 @@ void fbcon_putc_factor(char c, int type, unsigned scale_factor)
 	if (!config)
 		return;
 
-	if((unsigned char)c > 127)
+	if((unsigned char)c > 255)
 		return;
 
-	if((unsigned char)c < 32) {
-		if(c == '\n')
-			goto newline;
-		else if (c == '\r') {
-			cur_pos.x = 0;
-			return;
-		}
-		else
-			return;
+	if(c == '\n')
+		goto newline;
+	else if (c == '\r') {
+		cur_pos.x = 0;
+		return;
 	}
 
-	if (cur_pos.x == 0 && (unsigned char)c == ' ' &&
+	/*if (cur_pos.x == 0 && (unsigned char)c == ' ' &&
 		type != FBCON_SUBTITLE_MSG &&
 		type != FBCON_TITLE_MSG)
-		return;
+		return;*/
 
 	fbcon_set_colors(type);
 
@@ -357,7 +346,7 @@ void fbcon_putc_factor(char c, int type, unsigned scale_factor)
 	pixels += cur_pos.x * scale_factor * ((config->bpp / 8) * (FONT_WIDTH + 1));
 
 	fbcon_drawglyph(pixels, FGCOLOR, config->stride, (config->bpp / 8),
-			font5x12 + (c - 32) * 2, scale_factor);
+			&fontdata[(unsigned)c * 2 * FONT_HEIGHT], scale_factor);
 
 	cur_pos.x++;
 	if (cur_pos.x >= (int)(max_pos.x / scale_factor))

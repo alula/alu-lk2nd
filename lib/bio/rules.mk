@@ -1,6 +1,6 @@
 LOCAL_DIR := $(GET_LOCAL_DIR)
 
-MODULES +=
+MODULES += lib/partition
 
 OBJS += \
 	$(LOCAL_DIR)/bio.o \

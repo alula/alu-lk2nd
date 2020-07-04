@@ -4,7 +4,7 @@ INCLUDES += -I$(LK_TOP_DIR)/platform/msm_shared/include -I$(LK_TOP_DIR)/lib/zlib
 
 DEFINES += ASSERT_ON_TAMPER=1
 
-MODULES += lib/zlib_inflate
+MODULES += lib/zlib_inflate lib/fs
 
 OBJS += \
 	$(LOCAL_DIR)/aboot.o \
@@ -12,6 +12,7 @@ OBJS += \
 	$(LOCAL_DIR)/fastboot-lk2nd.o \
 	$(LOCAL_DIR)/lk2nd-device.o \
 	$(LOCAL_DIR)/lk2nd-samsung.o \
+	$(LOCAL_DIR)/ext2boot.o \
 	$(LOCAL_DIR)/recovery.o
 
 ifeq ($(ENABLE_UNITTEST_FW), 1)

@@ -29,13 +29,19 @@
 #ifndef __PLATFORM_MSM_SHARED_KEYS_DETECT_H
 #define __PLATFORM_MSM_SHARED_KEYS_DETECT_H
 
+#define NUM_SLOTS 4
+
 enum device_select_option {
 	POWEROFF = 0,
 	RESTART,
 	RECOVER,
 	FASTBOOT,
+	EDL,
+	RAMOOPS,
 	BACK,
 
+	BOOT,
+	BOOT_SEC,
 	CONTINUE,
 	FFBM,
 };

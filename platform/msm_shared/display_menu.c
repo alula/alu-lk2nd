@@ -29,6 +29,7 @@
 #include <debug.h>
 #include <reg.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <openssl/evp.h>
 #include <dev/fbcon.h>
 #include <kernel/thread.h>
@@ -42,6 +43,7 @@
 #include <sys/types.h>
 #include <../../../app/aboot/devinfo.h>
 #include <../../../app/aboot/lk2nd-device.h>
+#include <lib/fs.h>
 
 static const char *unlock_menu_common_msg = "If you unlock the bootloader, "\
 				"you will be able to install "\
@@ -102,15 +104,52 @@ static char *verify_option_menu[] = {
 		[BACK] = "Back to previous page\n"};
 
 static char *fastboot_option_menu[] = {
-		[0] = "START\n",
-		[1] = "Restart bootloader\n",
-		[2] = "Recovery mode\n",
-		[3] = "Power off\n",
-		[4] = "Boot to FFBM\n",
-		[5] = "Blank\n"};
+		[0] = "Boot internal\n",
+		[1] = "slot 1 not present\n",
+		[2] = "slot 2 not present\n",
+		[3] = "slot 3 not present\n",
+		[4] = "slot 4 not present\n",
+		[5] = "Boot recovery\n",
+		[6] = "Dump ramoops\n",
+		[7] = "EDL mode\n",
+		[8] = "Power off\n",
+		[9] = "Restart\n"};
+
+bool slots_present[NUM_SLOTS] = {false};
+char slot_names[NUM_SLOTS][32] = {0};
 
 static int big_factor = 2;
 static int common_factor = 1;
+
+void boot_slots_init() {
+	char filename[48] = {0};
+	char buf[32] = {0};
+	int err;
+
+	if ((err = fs_mount("/boot", "ext2", "hd1p25")) != 0) {
+		printf("fs_mount failed: %d\n", err);
+		thread_sleep(1000);
+		return;
+	}
+
+	for (int i = 0; i < NUM_SLOTS; i++) {
+		snprintf(&filename, 48, "/boot/slot%d.txt", i + 1);
+		if (fs_load_file(filename, &buf, 32) > 0) {
+			for (int j = 0; j < 31; j++) {
+				if (buf[j] != 0 && buf[j] != '\n' && buf[j] != '\r' && buf[j] != '\t') {
+					slot_names[i][j] = buf[j];
+				} else {
+					slot_names[i][j] = '\n';
+					slot_names[i][31] = '\n';
+					break;
+				}
+			}
+
+			fastboot_option_menu[i + 1] = slot_names[i];
+			slots_present[i] = true;
+		}
+	}
+}
 
 static void wait_for_exit()
 {
@@ -168,7 +207,7 @@ static void set_message_factor()
 	}
 }
 
-static void display_fbcon_menu_message(char *str, unsigned type,
+void display_fbcon_menu_message(char *str, unsigned type,
 	unsigned scale_factor)
 {
 	while(*str != 0) {
@@ -377,34 +416,53 @@ void display_fastboot_menu_renew(struct select_msg_info *fastboot_msg_info)
 	uint32_t option_index = fastboot_msg_info->info.option_index;
 
 	fbcon_clear();
+
+	display_fbcon_menu_message("\n      Alula's lk2nd-based bootloader\n\n", 
+		FBCON_BLUE_MSG, common_factor);
+	fbcon_draw_line(FBCON_BLUE_MSG);
+	
 	memset(&fastboot_msg_info->info, 0, sizeof(struct menu_info));
 
 	len = ARRAY_SIZE(fastboot_option_menu);
-	switch(option_index) {
-		case 0:
-			msg_type = FBCON_GREEN_MSG;
-			break;
-		case 1:
-		case 2:
-			msg_type = FBCON_RED_MSG;
-			break;
-		case 3:
-		case 4:
-			msg_type = FBCON_COMMON_MSG;
-			break;
-		case 5:
-			fbcon_flush();
-			goto end;
+
+	for (int i = 0; i < len; i++) {
+		//fbcon_draw_line(msg_type);
+		switch(i) {
+			case 0:
+			case 1:
+			case 2:
+			case 3:
+			case 4:
+			case 5:
+				msg_type = FBCON_GREEN_MSG;
+				break;
+			case 6:
+			case 7:
+				msg_type = FBCON_ORANGE_MSG;
+				break;
+			default:
+				msg_type = FBCON_RED_MSG;
+				break;
+		}
+
+		if (i > 0 && i < (NUM_SLOTS + 1) && !slots_present[i - 1]) {
+			continue;
+		}
+
+		display_fbcon_menu_message(i == option_index ? "  \x1a " : "    ",
+			FBCON_COMMON_MSG, common_factor);
+		display_fbcon_menu_message(fastboot_option_menu[i],
+			i == option_index ? FBCON_SELECT_MSG_BG_COLOR : msg_type, common_factor);
+		//fbcon_draw_line(msg_type);
 	}
+	
+	display_fbcon_menu_message("\n", FBCON_COMMON_MSG, 1);
+	fbcon_draw_line(FBCON_BLUE_MSG);
+	
+	display_fbcon_menu_message("Press volume key to move and "\
+		"power key to select\n\n", FBCON_COMMON_MSG, common_factor);
 
-	fbcon_draw_line(msg_type);
-	display_fbcon_menu_message(fastboot_option_menu[option_index],
-		msg_type, big_factor);
-	fbcon_draw_line(msg_type);
-	display_fbcon_menu_message("\n\nPress volume key to select, and "\
-		"press power key to select\n\n", FBCON_COMMON_MSG, common_factor);
-
-	display_fbcon_menu_message("FASTBOOT MODE\n", FBCON_RED_MSG, common_factor);
+	display_fbcon_menu_message("FASTBOOT ENABLED\n", FBCON_GREEN_MSG, common_factor);
 
 	get_product_name((unsigned char *) msg_buf);
 	snprintf(msg, sizeof(msg), "PRODUCT_NAME - %s\n", msg_buf);
@@ -421,7 +479,7 @@ void display_fastboot_menu_renew(struct select_msg_info *fastboot_msg_info)
 		msg_buf, target_is_emmc_boot()? "eMMC":"UFS");
 	display_fbcon_menu_message(msg, FBCON_COMMON_MSG, common_factor);
 
-	memset(msg_buf, 0, sizeof(msg_buf));
+	/*memset(msg_buf, 0, sizeof(msg_buf));
 	get_bootloader_version((unsigned char *) msg_buf);
 	snprintf(msg, sizeof(msg), "BOOTLOADER VERSION - %s\n",
 		msg_buf);
@@ -431,7 +489,7 @@ void display_fastboot_menu_renew(struct select_msg_info *fastboot_msg_info)
 	get_baseband_version((unsigned char *) msg_buf);
 	snprintf(msg, sizeof(msg), "BASEBAND VERSION - %s\n",
 		msg_buf);
-	display_fbcon_menu_message(msg, FBCON_COMMON_MSG, common_factor);
+	display_fbcon_menu_message(msg, FBCON_COMMON_MSG, common_factor);*/
 
 	memset(msg_buf, 0, sizeof(msg_buf));
 	target_serialno((unsigned char *) msg_buf);
@@ -442,9 +500,15 @@ void display_fastboot_menu_renew(struct select_msg_info *fastboot_msg_info)
 		is_secure_boot_enable()? "enabled":"disabled");
 	display_fbcon_menu_message(msg, FBCON_COMMON_MSG, common_factor);
 
-	snprintf(msg, sizeof(msg), "DEVICE STATE - %s\n",
+	display_fbcon_menu_message("CERTIFIED BY HUONG TRAM - yes\n", FBCON_COMMON_MSG, common_factor);
+	
+	display_fbcon_menu_message("\nJoin DanctNIX @\n", FBCON_BLUE_MSG, 1);
+	display_fbcon_menu_message("https://discord.gg/AvtdRJ3\n", FBCON_BLUE_MSG, 1);
+	display_fbcon_menu_message("#danctnix-general:matrix.org\n\n", FBCON_BLUE_MSG, 1);
+
+	/*snprintf(msg, sizeof(msg), "DEVICE STATE - %s\n",
 		is_device_locked()? "locked":"unlocked");
-	display_fbcon_menu_message(msg, FBCON_RED_MSG, common_factor);
+	display_fbcon_menu_message(msg, FBCON_RED_MSG, common_factor);*/
 
 end:
 	fastboot_msg_info->info.msg_type = DISPLAY_MENU_FASTBOOT;

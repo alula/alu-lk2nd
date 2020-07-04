@@ -30,12 +30,7 @@
 
 #define LOCAL_TRACE 0
 
-struct bdev_struct {
-	struct list_node list;
-	mutex_t lock;
-};
-
-static struct bdev_struct *bdevs;
+struct bdev_struct *bdevs;
 
 /* default implementation is to use the read_block hook to 'deblock' the device */
 static ssize_t bio_default_read(struct bdev *dev, void *_buf, off_t offset, size_t len)
@@ -387,6 +382,9 @@ void bio_initialize_bdev(bdev_t *dev, const char *name, size_t block_size, bnum_
 	dev->block_count = block_count;
 	dev->size = (off_t)block_count * block_size;
 	dev->ref = 0;
+	dev->label = NULL;
+	dev->is_gpt = false;
+	dev->is_subdev = false;
 
 	/* set up the default hooks, the sub driver should override the block operations at least */
 	dev->read = bio_default_read;

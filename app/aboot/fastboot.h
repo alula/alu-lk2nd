@@ -55,6 +55,6 @@ void fastboot_okay(const char *result);
 void fastboot_fail(const char *reason);
 void fastboot_info(const char *reason);
 void fastboot_stage(const void *data, unsigned sz);
-
+void boot_slots_init();
 
 #endif

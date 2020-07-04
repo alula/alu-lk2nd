@@ -498,7 +498,6 @@ void *dev_tree_appended(void *kernel, uint32_t kernel_size, uint32_t dtb_offset,
 	while (((uintptr_t)dtb + sizeof(struct fdt_header)) < (uintptr_t)kernel_end) {
 		struct fdt_header dtb_hdr;
 		uint32_t dtb_size;
-
 		/* the DTB could be unaligned, so extract the header,
 		 * and operate on it separately */
 		memcpy(&dtb_hdr, dtb, sizeof(struct fdt_header));

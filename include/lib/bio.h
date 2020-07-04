@@ -25,6 +25,7 @@
 
 #include <sys/types.h>
 #include <list.h>
+#include <kernel/mutex.h>
 
 typedef uint32_t bnum_t;
 
@@ -37,6 +38,9 @@ typedef struct bdev {
 	off_t size;
 	size_t block_size;
 	bnum_t block_count;
+	char *label;
+	bool is_gpt;
+	bool is_subdev;
 
 	/* function pointers */
 	ssize_t (*read)(struct bdev *, void *buf, off_t offset, size_t len);
@@ -47,6 +51,11 @@ typedef struct bdev {
 	int (*ioctl)(struct bdev *, int request, void *argp);
 	void (*close)(struct bdev *);
 } bdev_t;
+
+struct bdev_struct {
+	struct list_node list;
+	mutex_t lock;
+};
 
 /* user api */
 bdev_t *bio_open(const char *name);

@@ -95,7 +95,7 @@
 #include <display_menu.h>
 #include "fastboot_test.h"
 
-extern  bool target_use_signed_kernel(void);
+extern bool target_use_signed_kernel(void);
 extern void platform_uninit(void);
 extern void target_uninit(void);
 extern int get_target_boot_params(const char *cmdline, const char *part,
@@ -109,7 +109,9 @@ static int aboot_save_boot_hash_mmc(uint32_t image_addr, uint32_t image_size);
 static int aboot_frp_unlock(char *pname, void *data, unsigned sz);
 static inline uint64_t validate_partition_size();
 bool pwr_key_is_pressed = false;
-static bool is_systemd_present=false;
+static bool is_systemd_present = false;
+static bool charger_boot = false;
+static bool boot2 = false;
 static void publish_getvar_multislot_vars();
 static bool critical_flash_allowed(const char * entry);
 /* fastboot command function pointer */
@@ -509,8 +511,8 @@ static unsigned char *update_cmdline0(const char * cmdline)
 		cmdline_len += strlen(loglevel);
 	} else if (boot_reason_alarm) {
 		cmdline_len += strlen(alarmboot_cmdline);
-	} else if ((target_build_variant_user() || device.charger_screen_enabled)
-			&& target_pause_for_battery_charge()) {
+	} else if (((target_build_variant_user() || device.charger_screen_enabled)
+			&& target_pause_for_battery_charge()) || charger_boot) {
 		pause_at_bootup = 1;
 		cmdline_len += strlen(battchg_pause);
 	}
@@ -1443,11 +1445,11 @@ int boot_linux_from_mmc(void)
 
 	/* For a/b recovery image code is on boot partition.
 	   If we support multislot, always use boot partition. */
-	if (boot_into_recovery &&
-		(!partition_multislot_is_supported()))
-			ptn_name = "recovery";
-	else
-			ptn_name = "boot";
+	if (boot_into_recovery && (!partition_multislot_is_supported()))
+		ptn_name = "recovery";
+	else {
+		ptn_name = "boot";
+	}
 
 	index = partition_get_index(ptn_name);
 	ptn = partition_get_offset(index);
@@ -4528,7 +4530,8 @@ void aboot_init(const struct app_descriptor *app)
 	target_serialno((unsigned char *) sn_buf);
 	dprintf(SPEW,"serial number: %s\n",sn_buf);
 
-	memset(display_panel_buf, '\0', MAX_PANEL_BUF_SIZE);
+	boot_slots_init();
+	//memset(display_panel_buf, '\0', MAX_PANEL_BUF_SIZE);
 
 	/* Check if we should do something other than booting up */
 	if (keys_get_state(KEY_VOLUMEUP) && keys_get_state(KEY_VOLUMEDOWN))
@@ -4541,11 +4544,10 @@ void aboot_init(const struct app_descriptor *app)
 	}
 	if (!boot_into_fastboot)
 	{
-		if (keys_get_state(KEY_HOME) || keys_get_state(KEY_VOLUMEUP))
-			boot_into_recovery = 1;
-		if ((!boot_into_recovery &&
-			(keys_get_state(KEY_BACK) || keys_get_state(KEY_VOLUMEDOWN))) !=
-				lk2nd_dev.dev_mode)
+		if (keys_get_state(KEY_HOME) || keys_get_state(KEY_VOLUMEUP)) 
+			boot_into_recovery = true;
+		//if ((!boot_into_recovery && (keys_get_state(KEY_BACK) || keys_get_state(KEY_VOLUMEDOWN))) != lk2nd_dev.dev_mode)
+		if (!boot_into_recovery)
 			boot_into_fastboot = true;
 	}
 	#if NO_KEYPAD_DRIVER
@@ -4558,15 +4560,23 @@ void aboot_init(const struct app_descriptor *app)
 #else
 	reboot_mode = check_reboot_mode();
 #endif
+	dprintf(SPEW, "Poweron mode: 0x%x\n", reboot_mode);
+	/*if (reboot_mode == CHARGER_BOOT)
+	{
+		display_fbcon_menu_message("Charger connected, autobooting...\n", FBCON_ORANGE_MSG, 1);
+		boot_into_fastboot = false;
+		charger_boot = true;
+		goto normal_boot;
+	} else */
 	if (reboot_mode == RECOVERY_MODE)
 	{
 		boot_into_recovery = 1;
 	}
-	else if(reboot_mode == FASTBOOT_MODE)
+	else if (reboot_mode == FASTBOOT_MODE)
 	{
 		boot_into_fastboot = true;
 	}
-	else if(reboot_mode == ALARM_BOOT)
+	else if (reboot_mode == ALARM_BOOT)
 	{
 		boot_reason_alarm = true;
 	}
